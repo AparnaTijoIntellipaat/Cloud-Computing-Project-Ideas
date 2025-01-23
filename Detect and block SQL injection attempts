@@ -1,0 +1,104 @@
+Architecture Overview
+Amazon Cognito: Handles user authentication and ensures only authorized users access the application.
+AWS WAF: Detects and blocks SQL injection attempts at the application layer using rules.
+Application Layer: Implements validation and logging mechanisms to detect potential SQL injections.
+Amazon RDS: Stores sensitive application data securely and logs database queries for monitoring.
+Amazon SNS: Sends alerts when SQL injection patterns are detected.
+AWS SAM: Automates the deployment of Lambda functions, WAF rules, and infrastructure.
+
+Step-by-Step Design
+1. User Authentication (Amazon Cognito)
+Purpose: Authenticate users and provide secure access tokens.
+Steps:
+Create a Cognito User Pool for user sign-up and sign-in.
+Create an App Client for the application and configure token expiration policies.
+Use Cognito Identity Pool to issue temporary credentials for accessing AWS resources.
+
+2. Database Setup (Amazon RDS)
+Purpose: Store application data securely.
+Steps:
+Launch an Amazon RDS instance with encryption enabled.
+Use IAM authentication to connect securely.
+Enable database activity streams for monitoring queries.
+Restrict public access and configure the security group to allow connections only from trusted sources (e.g., the application server).
+
+3. Application Layer
+Purpose: Validate user inputs and log database queries.
+Steps:
+Use a secure framework that prevents SQL injection (e.g., prepared statements in Python, Java, etc.).
+Implement input validation to sanitize and validate user inputs before they are sent to the database.
+Log all database queries with metadata (e.g., user ID, query time) to a CloudWatch Logs group for further analysis.
+
+4. Web Application Firewall (AWS WAF)
+Purpose: Detect and block SQL injection attempts.
+Steps:
+Attach an AWS WAF WebACL to the application’s API Gateway or CloudFront distribution.
+Create SQL Injection Rules using AWS Managed Rule Groups:
+AWS-AWSManagedRulesSQLiRuleSet: Blocks common SQL injection patterns.
+Configure logging for WAF to a CloudWatch Logs group.
+
+5. Alerting System (Amazon SNS)
+Purpose: Notify administrators about potential SQL injection attempts or data leaks.
+Steps:
+Create an SNS Topic for alerts (e.g., "SQLInjectionAlerts").
+Subscribe administrators via email or SMS to the topic.
+Set up a CloudWatch Alarm that triggers the SNS topic when:
+WAF detects a SQL injection pattern.
+Query patterns in database activity streams match suspicious behaviors.
+
+6. Automation with AWS SAM
+Purpose: Automate deployment and ensure consistency.
+Steps:
+Create a template.yaml file defining resources:
+Lambda functions: Process logs and detect anomalies.
+WAF WebACL: Attach SQL injection rules.
+RDS instance: Configure database settings.
+SNS Topic: For alerting.
+Deploy using sam deploy --guided.
+
+--------------------------------------------------------------------
+Example SAM Template:
+
+Resources:
+  WAFWebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Scope: REGIONAL
+      DefaultAction: 
+        Allow: {}
+      Rules:
+        - Name: SQLiRule
+          Priority: 1
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesSQLiRuleSet
+          Action: 
+            Block: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: SQLiMetrics
+  
+  SNSAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: SQLInjectionAlerts
+
+  AlertLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.handler
+      Runtime: python3.9
+      Events:
+        WAFAlert:
+          Type: CloudWatchEvent
+          Properties:
+            Pattern:
+              source:
+                - aws.waf
+              detail-type:
+                - AWS API Call via CloudTrail
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref SNSAlertTopic
